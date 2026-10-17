@@ -1,4 +1,4 @@
-# OpenCode JB Launcher
+# OpenCode Jailbreak Launcher
 
 **Give each instruction set its own workspace. Start OpenCode with a few clicks.**
 
