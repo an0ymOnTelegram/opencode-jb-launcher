@@ -14,7 +14,6 @@ A lightweight launcher for **macOS and Windows** that lets you paste a prompt or
 - **Formatting preservation:** retains Markdown, indentation, tabs, and blank lines. Pasted text is saved as UTF-8.
 - **Automatic backups:** preserves an existing `AGENTS.md` before replacing it.
 - **Version check:** verifies OpenCode v2 before opening the setup dialogs.
-- **Persistent UI banner:** installs a global plugin with an animated rainbow message and an underlined Telegram link.
 
 ## Download and start
 
