@@ -1,0 +1,163 @@
+# Windows PowerShell helper. Start via OpenCode-jb.bat.
+$ErrorActionPreference = 'Stop'
+try {
+    $env:PATH = "$env:USERPROFILE\.opencode\bin;$env:USERPROFILE\.bun\bin;$env:APPDATA\npm;$env:USERPROFILE\scoop\shims;$env:PATH"
+    $cli = Get-Command opencode -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cli) {
+        throw 'OpenCode v2 is not installed or not available on PATH. Please install OpenCode v2: https://opencode.ai'
+    }
+    try {
+        $version = (& $cli.Source --version 2>$null) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'Version command failed.' }
+    } catch {
+        throw 'Could not verify OpenCode v2. Please install or repair OpenCode v2: https://opencode.ai'
+    }
+    if ($version -cnotmatch '^\s*(opencode\s+)?v?2\.[0-9]+\.[0-9]+([-+][a-zA-Z0-9.-]+)?\s*$') {
+        throw "OpenCode v2 is required. Detected: $version. Please install OpenCode v2: https://opencode.ai"
+    }
+    Write-Host "OpenCode v2 detected: $version"
+    $paths = & $cli.Source debug paths
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read OpenCode paths.' }
+    $configLine = $paths | Where-Object { $_ -match '^config\s+' } | Select-Object -First 1
+    if (-not $configLine) { throw 'Could not locate the OpenCode configuration directory.' }
+    $configDir = $configLine -replace '^config\s+', ''
+    if (-not [IO.Path]::IsPathRooted($configDir)) { throw 'OpenCode returned an invalid configuration path.' }
+    Add-Type -AssemblyName System.Windows.Forms
+    $choice = New-Object System.Windows.Forms.Form
+    $choice.Text = 'OpenCode instructions'
+    $choice.ClientSize = New-Object System.Drawing.Size(460, 100)
+    $choice.StartPosition = 'CenterScreen'
+    $choice.FormBorderStyle = 'FixedDialog'
+    $choice.MaximizeBox = $false
+    $choice.MinimizeBox = $false
+    $pasteButton = New-Object System.Windows.Forms.Button
+    $pasteButton.Text = 'Paste system prompt'
+    $pasteButton.SetBounds(20, 25, 200, 45)
+    $pasteButton.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+    $fileButton = New-Object System.Windows.Forms.Button
+    $fileButton.Text = 'Select AGENTS.md'
+    $fileButton.SetBounds(240, 25, 200, 45)
+    $fileButton.DialogResult = [System.Windows.Forms.DialogResult]::No
+    $choice.Controls.AddRange(@($pasteButton, $fileButton))
+    try { $mode = $choice.ShowDialog() } finally { $choice.Dispose() }
+    if ($mode -ne [System.Windows.Forms.DialogResult]::Yes -and $mode -ne [System.Windows.Forms.DialogResult]::No) { exit 0 }
+    $source = $null
+    $promptText = $null
+    if ($mode -eq [System.Windows.Forms.DialogResult]::Yes) {
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = 'Paste system prompt - saved as AGENTS.md project instructions'
+        $form.ClientSize = New-Object System.Drawing.Size(960, 680)
+        $form.MinimumSize = New-Object System.Drawing.Size(580, 400)
+        $form.StartPosition = 'CenterScreen'
+        $form.FormBorderStyle = 'Sizable'
+        $form.MaximizeBox = $true
+        $editor = New-Object System.Windows.Forms.TextBox
+        $editor.Multiline = $true
+        $editor.AcceptsReturn = $true
+        $editor.AcceptsTab = $true
+        $editor.ScrollBars = 'Both'
+        $editor.WordWrap = $false
+        $editor.Font = New-Object System.Drawing.Font('Consolas', 12)
+        $editor.Anchor = 'Top, Bottom, Left, Right'
+        $editor.MaxLength = 0
+        $editor.SetBounds(15, 15, 930, 600)
+        $ok = New-Object System.Windows.Forms.Button
+        $ok.Text = 'Continue'
+        $ok.SetBounds(835, 630, 110, 35)
+        $ok.Anchor = 'Bottom, Right'
+        $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $cancel = New-Object System.Windows.Forms.Button
+        $cancel.Text = 'Cancel'
+        $cancel.SetBounds(710, 630, 110, 35)
+        $cancel.Anchor = 'Bottom, Right'
+        $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $form.CancelButton = $cancel
+        $form.Controls.AddRange(@($editor, $ok, $cancel))
+        try {
+            if ($form.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 0 }
+            $promptText = $editor.Text
+        } finally { $form.Dispose() }
+        if ([string]::IsNullOrWhiteSpace($promptText)) { exit 0 }
+    } else {
+    $picker = New-Object System.Windows.Forms.OpenFileDialog
+    $picker.Title = 'Find and select your agents.md file'
+    $picker.Filter = 'Markdown files (*.md)|*.md|All files (*.*)|*.*'
+    $picker.CheckFileExists = $true
+    $picker.Multiselect = $false
+    try {
+        if ($picker.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { exit 0 }
+        $source = $picker.FileName
+    } finally {
+        $picker.Dispose()
+    }
+    if ([IO.Path]::GetFileName($source) -ine 'agents.md') {
+        throw 'Select a file named agents.md (case-insensitive).'
+    }
+    }
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    while ($true) {
+        $workspaceName = [Microsoft.VisualBasic.Interaction]::InputBox(
+            'Name this JB workspace. A folder with this name will be used on your Desktop.',
+            'OpenCode workspace', 'jb')
+        if ([string]::IsNullOrEmpty($workspaceName)) { exit 0 }
+        $invalid = $workspaceName.Length -gt 80 -or
+            $workspaceName -match '^[.\s]|[.\s]$|[<>:"/\\|?*\x00-\x1f\x7f]' -or
+            $workspaceName -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])([.]|$)'
+        if (-not $invalid) { break }
+        [System.Windows.Forms.MessageBox]::Show(
+            'Use 1-80 characters, no path separators or reserved characters, no leading dot or whitespace, and no trailing dot or whitespace. Windows device names such as CON are not allowed.',
+            'Invalid folder name') | Out-Null
+    }
+    $desktop = [Environment]::GetFolderPath('DesktopDirectory')
+    if (-not $desktop) { throw 'Could not locate your Desktop folder.' }
+    $target = Join-Path $desktop $workspaceName
+    if (Test-Path -LiteralPath $target) {
+        $item = Get-Item -LiteralPath $target -Force
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'The selected workspace must not be a symbolic link or junction.'
+        }
+    }
+    [IO.Directory]::CreateDirectory($target) | Out-Null
+    $destination = Join-Path $target 'AGENTS.md'
+    if ((Test-Path -LiteralPath $destination) -and ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'AGENTS.md must not be a symbolic link.'
+    }
+    if ($mode -eq [System.Windows.Forms.DialogResult]::Yes -or [IO.Path]::GetFullPath($source) -ine [IO.Path]::GetFullPath($destination)) {
+        if (Test-Path -LiteralPath $destination) {
+            $backup = "$destination.backup.$([Guid]::NewGuid().ToString('N'))"
+            Copy-Item -LiteralPath $destination -Destination $backup
+        }
+        if ($mode -eq [System.Windows.Forms.DialogResult]::Yes) {
+            [IO.File]::WriteAllText($destination, $promptText, (New-Object System.Text.UTF8Encoding($false)))
+        } else {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+    }
+    $pluginSource = Join-Path $env:JB_LAUNCHER_DIR 'jb-banner\tui.tsx'
+    if (-not (Test-Path -LiteralPath $pluginSource -PathType Leaf)) {
+        throw 'Missing jb-banner/tui.tsx. Extract the entire ZIP first.'
+    }
+    $pluginDir = Join-Path $configDir 'plugins\jb-launcher-banner'
+    [IO.Directory]::CreateDirectory($pluginDir) | Out-Null
+    $pluginDestination = Join-Path $pluginDir 'tui.tsx'
+    if (Test-Path -LiteralPath $pluginDestination) {
+        if ([IO.File]::ReadAllText($pluginSource) -cne [IO.File]::ReadAllText($pluginDestination)) {
+            Copy-Item -LiteralPath $pluginDestination -Destination "$pluginDestination.backup.$([Guid]::NewGuid().ToString('N'))"
+        }
+    }
+    Copy-Item -LiteralPath $pluginSource -Destination $pluginDestination -Force
+    $localPlugin = Join-Path $target '.opencode\plugins\jb-launcher-banner\tui.tsx'
+    if (Test-Path -LiteralPath $localPlugin -PathType Leaf) {
+        if ([IO.File]::ReadAllText($localPlugin) -ceq [IO.File]::ReadAllText($pluginSource)) {
+            $retired = Join-Path $target ".opencode\jb-banner-retired.$([Guid]::NewGuid().ToString('N'))"
+            Move-Item -LiteralPath $localPlugin -Destination $retired
+        }
+    }
+    Set-Location -LiteralPath $target
+    Write-Host "Starting OpenCode in: $target"
+    & $cli.Source
+    if ($LASTEXITCODE -ne 0) { throw "OpenCode exited with error code $LASTEXITCODE." }
+} catch {
+    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
